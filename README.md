@@ -21,4 +21,3 @@ Use slurm scripts: sbatch slurm/openmp.slurm etc.
 - Periodic boundaries support
 - Energy conservation check
 
-Results in report.pdf (scaling plots on Orfeo).
