@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=0
 #SBATCH --partition=dcgp_usr_prod
-#SBATCH --account=uTS25_Tornator_0
+#SBATCH --account=AHMEDTAREKELSAYEDMOHAMED.ELSAYED_25986
 #SBATCH --time=00:10:00
 #SBATCH --output=omp_scaling_%j.out
 
@@ -17,7 +17,7 @@ ARGS="-x 10000 -y 10000 -n 200 -p 1"
 # EPYC nodes have 128 cores
 THREAD_COUNTS=(1 2 4 8 16 32 64 128)
 
-echo "Threads,TotalTime,CommTime,CompTime" > omp_scaling_results.csv
+echo "Threads,TotalTime,CommTime,CompTime" > scaling_results/omp_scaling_results.csv
 
 for t in "${THREAD_COUNTS[@]}"; do
     export OMP_NUM_THREADS=$t
