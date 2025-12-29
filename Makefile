@@ -1,6 +1,6 @@
 CC = gcc
 MPICC = mpicc
-CFLAGS = -O3 -lm -Iinclude
+CFLAGS = -O3 -lm -Iinclude  
 OMPFLAGS = -fopenmp
 
 all: serial parallel
