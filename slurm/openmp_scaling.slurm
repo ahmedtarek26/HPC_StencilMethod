@@ -4,7 +4,7 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=0
 #SBATCH --partition=dcgp_usr_prod
-#SBATCH --account=AHMEDTAREKELSAYEDMOHAMED.ELSAYED_25986
+#SBATCH --account= uTS25_Tornator
 #SBATCH --time=00:10:00
 #SBATCH --output=omp_scaling_%j.out
 
