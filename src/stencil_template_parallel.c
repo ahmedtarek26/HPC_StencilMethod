@@ -26,7 +26,12 @@ int main(int argc, char **argv)
   }
 
   #pragma omp parallel
-  { #pragma omp master { g_n_omp_threads = omp_get_num_threads(); } }
+  {
+    #pragma omp master
+    {
+      g_n_omp_threads = omp_get_num_threads();
+    }
+  }
   g_per_thread_comp_time = (double*)calloc(g_n_omp_threads, sizeof(double));
 
   initialize(&myCOMM_WORLD, Rank, Ntasks, argc, argv, &S, &N, &periodic, &output_energy_stat_perstep,
@@ -58,6 +63,7 @@ int main(int argc, char **argv)
       buffers[RECV][WEST] = (double*)malloc(sy * sizeof(double));
     }
 
+    #pragma omp parallel for
     for (int j = 1; j <= sy; j++) {
       buffers[SEND][WEST][j-1] = cp[j * fsx + 1];
       buffers[SEND][EAST][j-1] = cp[j * fsx + sx];
@@ -83,6 +89,7 @@ int main(int argc, char **argv)
     MPI_Waitall(ri, reqs, MPI_STATUSES_IGNORE);
     total_comm_time += MPI_Wtime() - section_start;
 
+    #pragma omp parallel for
     for (int j = 1; j <= sy; j++) {
       cp[j * fsx] = buffers[RECV][WEST][j-1];
       cp[j * fsx + sx + 1] = buffers[RECV][EAST][j-1];
@@ -105,7 +112,6 @@ int memory_release (plane_t *planes, buffers_t *buffers) {
   if (buffers) {
     if ((*buffers)[EAST]) free((*buffers)[EAST]);
     if ((*buffers)[WEST]) free((*buffers)[WEST]);
-    // Note: NORTH/SOUTH buffers point to plane data, don't free them separately
   }
   return 0;
 }
@@ -132,7 +138,7 @@ int initialize(MPI_Comm *Comm, int Me, int Ntasks, int argc, char **argv, vec2_t
   int opt; while ((opt = getopt(argc, argv, "x:y:n:p:")) != -1) {
     switch(opt) { case 'x': (*S)[_x_]=atoi(optarg); break; case 'y': (*S)[_y_]=atoi(optarg); break; case 'n': *Niterations=atoi(optarg); break; case 'p': *periodic=atoi(optarg); break; }
   }
-  (*N)[_x_] = 1; (*N)[_y_] = Ntasks; // Simple 1D decomposition for stability
+  (*N)[_x_] = 1; (*N)[_y_] = Ntasks;
   int X = Me % (*N)[_x_], Y = Me / (*N)[_x_];
   neighbours[NORTH] = (Y > 0) ? Me - (*N)[_x_] : MPI_PROC_NULL;
   neighbours[SOUTH] = (Y < (*N)[_y_] - 1) ? Me + (*N)[_x_] : MPI_PROC_NULL;
@@ -140,7 +146,7 @@ int initialize(MPI_Comm *Comm, int Me, int Ntasks, int argc, char **argv, vec2_t
   planes[OLD].size[_x_] = (*S)[_x_]; planes[OLD].size[_y_] = (*S)[_y_] / Ntasks;
   planes[NEW].size[_x_] = planes[OLD].size[_x_]; planes[NEW].size[_y_] = planes[OLD].size[_y_];
   memory_allocate(neighbours, *N, buffers, planes);
-  *Nsources_local = 0; // Simplified for testing
+  *Nsources_local = 0;
   return 0;
 }
 
