@@ -1,19 +1,23 @@
 #include "stencil_template_parallel.h"
 #include <math.h>
+#include <stdlib.h>
 
 int g_n_omp_threads = 1;
 double* g_per_thread_comp_time = NULL;
 __thread double thread_local_comp_time = 0.0;
 
-// CORE STENCIL PARAMETERS
+// STENCIL PARAMETERS - ADJUST AS NEEDED
 #define ALPHA 0.1
 #define DX 1.0
 #define DY 1.0
 #define DT 0.01
 
+// Direction indices
+enum { NORTH=0, SOUTH, WEST, EAST, OLD=0, NEW };
+
 int main(int argc, char **argv) {
     MPI_Comm myCOMM_WORLD;
-    int Rank, Ntasks;
+    int Rank, Ntasks, level_obtained;
     int neighbours[4];
     int Niterations, periodic, output_energy_stat_perstep;
     vec2_t S, N;
@@ -23,23 +27,21 @@ int main(int argc, char **argv) {
     plane_t planes[2];
     buffers_t buffers[2];
 
-    {
-        int level_obtained;
-        MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &level_obtained);
-        MPI_Comm_rank(MPI_COMM_WORLD, &Rank);
-        MPI_Comm_size(MPI_COMM_WORLD, &Ntasks);
-        MPI_Comm_dup(MPI_COMM_WORLD, &myCOMM_WORLD);
-    }
+    // Initialize MPI with thread support
+    MPI_Init_thread(&argc, &argv, MPI_THREAD_FUNNELED, &level_obtained);
+    MPI_Comm_rank(MPI_COMM_WORLD, &Rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &Ntasks);
+    MPI_Comm_dup(MPI_COMM_WORLD, &myCOMM_WORLD);
 
+    // Get OpenMP threads
     #pragma omp parallel
     {
         #pragma omp master
-        {
-            g_n_omp_threads = omp_get_num_threads();
-        }
+        g_n_omp_threads = omp_get_num_threads();
     }
     g_per_thread_comp_time = (double*)calloc(g_n_omp_threads, sizeof(double));
 
+    // Initialize domain
     initialize(&myCOMM_WORLD, Rank, Ntasks, argc, argv, &S, &N, &periodic, &output_energy_stat_perstep,
                neighbours, &Niterations, &Nsources, &Nsources_local, &Sources_local, &energy_per_source,
                &planes[0], &buffers[0]);
@@ -50,22 +52,24 @@ int main(int argc, char **argv) {
     double alpha_dt_dx2 = ALPHA * DT / (DX * DX);
     double alpha_dt_dy2 = ALPHA * DT / (DY * DY);
 
+    // MAIN LOOP
     for (int iter = 0; iter < Niterations; ++iter) {
+        // Inject energy
         inject_energy(periodic, Nsources_local, Sources_local, energy_per_source, &planes[current], N);
-        
-        // --- HALO EXCHANGE START ---
+
+        // === COMMUNICATION PHASE ===
         double comm_start = MPI_Wtime();
         double* cp = planes[current].data;
         int sx = planes[current].size[_x_], sy = planes[current].size[_y_];
         int fsx = sx + 2;
 
-        // North/South buffers (contiguous)
+        // Set up buffer pointers (NORTH/SOUTH are contiguous)
         buffers[SEND][NORTH] = cp + fsx;
         buffers[SEND][SOUTH] = cp + sy * fsx;
         buffers[RECV][NORTH] = cp;
         buffers[RECV][SOUTH] = cp + (sy + 1) * fsx;
 
-        // East/West buffers (non-contiguous) - only allocate once
+        // Allocate East/West buffers ONCE
         if (!buffers[SEND][EAST]) {
             buffers[SEND][EAST] = (double*)malloc(sy * sizeof(double));
             buffers[RECV][EAST] = (double*)malloc(sy * sizeof(double));
@@ -73,7 +77,7 @@ int main(int argc, char **argv) {
             buffers[RECV][WEST] = (double*)malloc(sy * sizeof(double));
         }
 
-        // Pack East/West data
+        // Pack non-contiguous East/West data
         #pragma omp parallel for schedule(static)
         for (int j = 1; j <= sy; j++) {
             buffers[SEND][WEST][j-1] = cp[j * fsx + 1];
@@ -107,9 +111,8 @@ int main(int argc, char **argv) {
             cp[j * fsx] = buffers[RECV][WEST][j-1];
             cp[j * fsx + sx + 1] = buffers[RECV][EAST][j-1];
         }
-        // --- HALO EXCHANGE END ---
 
-        // --- COMPUTATION START ---
+        // === COMPUTATION PHASE ===
         double comp_start = MPI_Wtime();
         #pragma omp parallel
         {
@@ -118,15 +121,14 @@ int main(int argc, char **argv) {
             for (int j = 1; j <= sy; j++) {
                 for (int i = 1; i <= sx; i++) {
                     int idx = j * fsx + i;
-                    planes[!current].data[idx] = planes[current].data[idx] + 
-                        alpha_dt_dx2 * (planes[current].data[idx-1] + planes[current].data[idx+1] - 2*planes[current].data[idx]) +
-                        alpha_dt_dy2 * (planes[current].data[idx-fsx] + planes[current].data[idx+fsx] - 2*planes[current].data[idx]);
+                    planes[!current].data[idx] = cp[idx] + 
+                        alpha_dt_dx2 * (cp[idx-1] + cp[idx+1] - 2*cp[idx]) +
+                        alpha_dt_dy2 * (cp[idx-fsx] + cp[idx+fsx] - 2*cp[idx]);
                 }
             }
             g_per_thread_comp_time[omp_get_thread_num()] += omp_get_wtime() - thread_start;
         }
         total_comp_time += MPI_Wtime() - comp_start;
-        // --- COMPUTATION END ---
 
         current = !current;
         
@@ -135,12 +137,17 @@ int main(int argc, char **argv) {
         }
     }
 
+    // Final output
     if (Rank == 0) {
-        printf("Total time: %f, Comm: %f, Comp: %f\n", 
-               MPI_Wtime()-t_start, total_comm_time, total_comp_time);
-        printf("Per-thread computation times:\n");
+        printf("=== FINAL TIMING RESULTS ===\n");
+        printf("Total time: %.3f seconds\n", MPI_Wtime()-t_start);
+        printf("Communication time: %.3f seconds (%.1f%%)\n", 
+               total_comm_time, total_comm_time/(MPI_Wtime()-t_start)*100);
+        printf("Computation time: %.3f seconds (%.1f%%)\n", 
+               total_comp_time, total_comp_time/(MPI_Wtime()-t_start)*100);
+        printf("\nPer-thread computation times:\n");
         for (int i = 0; i < g_n_omp_threads; i++) {
-            printf("Thread %d: %f seconds\n", i, g_per_thread_comp_time[i]);
+            printf("  Thread %2d: %.3f seconds\n", i, g_per_thread_comp_time[i]);
         }
     }
 
@@ -149,17 +156,21 @@ int main(int argc, char **argv) {
     return 0;
 }
 
-// Implement missing functions
-int update_plane(int periodic, vec2_t N, plane_t *plane_old, plane_t *plane_new) {
-    return 0; // Now implemented inline in main
-}
+// ================= IMPLEMENTATIONS =================
 
 int inject_energy(int periodic, int Nsources_local, vec2_t *Sources_local, 
                   double energy_per_source, plane_t *plane, vec2_t N) {
+    if (!Sources_local) return 0;
+    
+    int sx = plane->size[_x_], sy = plane->size[_y_];
+    int fsx = sx + 2;
+    
     for (int s = 0; s < Nsources_local; s++) {
         int i = (int)Sources_local[s][_x_];
         int j = (int)Sources_local[s][_y_];
-        plane->data[j * (plane->size[_x_] + 2) + i] += energy_per_source;
+        if (i >= 0 && i < sx && j >= 0 && j < sy) {
+            plane->data[(j+1) * fsx + (i+1)] += energy_per_source;
+        }
     }
     return 0;
 }
@@ -177,23 +188,24 @@ int initialize(MPI_Comm *Comm, int Me, int Ntasks, int argc, char **argv,
     
     // Parse command line
     int opt; 
-    while ((opt = getopt(argc, argv, "x:y:n:p:")) != -1) {
+    while ((opt = getopt(argc, argv, "x:y:n:p:s:")) != -1) {
         switch(opt) { 
             case 'x': (*S)[_x_] = atoi(optarg); break; 
             case 'y': (*S)[_y_] = atoi(optarg); break; 
             case 'n': *Niterations = atoi(optarg); break; 
             case 'p': *periodic = atoi(optarg); break; 
+            case 's': *Nsources = atoi(optarg); break; 
         }
     }
 
-    // 2D DECOMPOSITION - FIX HERE
+    // ===== 2D DECOMPOSITION - CRITICAL FIX =====
     int Nx = (int)sqrt(Ntasks);
     while (Nx > 1 && Ntasks % Nx != 0) Nx--;
     int Ny = Ntasks / Nx;
     (*N)[_x_] = Nx;
     (*N)[_y_] = Ny;
 
-    // Calculate neighbors with periodic support
+    // Calculate neighbors WITH PERIODIC SUPPORT
     int X = Me % Nx, Y = Me / Nx;
     neighbours[NORTH] = (Y > 0) ? Me - Nx : (*periodic ? Me + Nx*(Ny-1) : MPI_PROC_NULL);
     neighbours[SOUTH] = (Y < Ny-1) ? Me + Nx : (*periodic ? Me - Nx*(Ny-1) : MPI_PROC_NULL);
@@ -208,7 +220,7 @@ int initialize(MPI_Comm *Comm, int Me, int Ntasks, int argc, char **argv,
 
     memory_allocate(neighbours, *N, buffers, planes);
     
-    // Simple source initialization (center of domain)
+    // Simple source initialization (center of local domain)
     *Nsources_local = (*Nsources > 0 && Me == 0) ? 1 : 0;
     if (*Nsources_local > 0) {
         *Sources_local = (vec2_t*)malloc(sizeof(vec2_t));
@@ -229,7 +241,7 @@ int memory_allocate (const int neighbours[4], const vec2_t N, buffers_t *buffers
     planes_ptr[OLD].data = (double*)malloc(fs); memset(planes_ptr[OLD].data, 0, fs);
     planes_ptr[NEW].data = (double*)malloc(fs); memset(planes_ptr[NEW].data, 0, fs);
     
-    // Only allocate if using separated buffers (not embedded)
+    // Initialize buffer pointers to NULL (allocated in main loop)
     (*buffers_ptr)[EAST] = NULL;
     (*buffers_ptr)[WEST] = NULL;
     
@@ -244,8 +256,6 @@ int memory_release (plane_t *planes, buffers_t *buffers) {
     if (buffers) {
         if ((*buffers)[EAST]) free((*buffers)[EAST]);
         if ((*buffers)[WEST]) free((*buffers)[WEST]);
-        if ((*buffers)[NORTH]) free((*buffers)[NORTH]); // Not used in embedded approach
-        if ((*buffers)[SOUTH]) free((*buffers)[SOUTH]);
     }
     if (g_per_thread_comp_time) free(g_per_thread_comp_time);
     return 0;
@@ -264,12 +274,12 @@ int output_energy_stat(int step, plane_t *plane, double budget, int Me, MPI_Comm
     }
     
     MPI_Reduce(&se, &tse, 1, MPI_DOUBLE, MPI_SUM, 0, *Comm);
-    if (Me == 0) printf("Step %d: Energy %g\n", step, tse);
+    if (Me == 0) printf("Step %d: Total Energy %g\n", step, tse);
     return 0;
 }
 
-uint simple_factorization(uint A, int *Nf, uint **f) { 
-    // Minimal implementation - returns factorization for grid decomposition
+// Stub implementations for compatibility
+int simple_factorization(uint A, int *Nf, uint **f) { 
     *Nf = 2;
     *f = (uint*)malloc(2 * sizeof(uint));
     (*f)[0] = (uint)sqrt(A);
@@ -279,14 +289,6 @@ uint simple_factorization(uint A, int *Nf, uint **f) {
 }
 
 int initialize_sources(int Me, int Nt, MPI_Comm *C, vec2_t ms, int Ns, int *Nsl, vec2_t **S) { 
-    // Simple centralized source distribution
-    *Nsl = (Ns > 0 && Me == 0) ? Ns : 0;
-    if (*Nsl > 0) {
-        *S = (vec2_t*)malloc(Ns * sizeof(vec2_t));
-        for (int i = 0; i < Ns; i++) {
-            (*S)[i][_x_] = ms[_x_] / 2; // Center point
-            (*S)[i][_y_] = ms[_y_] / 2;
-        }
-    }
+    // Sources are initialized in initialize() for simplicity
     return 0; 
 }

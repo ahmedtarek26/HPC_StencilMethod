@@ -1,15 +1,36 @@
-CC = gcc
-MPICC = mpicc
-CFLAGS = -O3 -lm -Iinclude
-OMPFLAGS = -fopenmp
+# Orfeo-specific Makefile - adjust modules as needed
 
-all: serial parallel
+# Compiler and flags
+CC = mpicc
+CFLAGS = -Wall -O3 -fopenmp -std=c99
+LDFLAGS = -fopenmp
+TARGET = stencil_parallel
+OBJS = stencil_template_parallel.o
 
-serial: src/stencil_template_serial.c
-	$(CC) $(CFLAGS) -o stencil_serial src/stencil_template_serial.c
+# Modules to load (check with 'module avail' on Orfeo)
+# module load gcc/11.3.0
+# module load openmpi/4.1.4
 
-parallel: src/stencil_template_parallel.c
-	$(MPICC) $(OMPFLAGS) $(CFLAGS) -o stencil_parallel src/stencil_template_parallel.c
+all: $(TARGET)
+
+$(TARGET): $(OBJS)
+	$(CC) $(LDFLAGS) -o $@ $^
+
+%.o: %.c
+	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f stencil_serial stencil_parallel *.out *.err
+	rm -f $(OBJS) $(TARGET) output_*.txt error_*.txt
+
+run: $(TARGET)
+	srun ./$(TARGET) -x 1000 -y 1000 -n 100 -p 0
+
+# Scaling study targets
+openmp_scaling: $(TARGET)
+	@echo "Running OpenMP scaling study..."
+	@for threads in 1 2 4 8 14 28 56; do \
+		echo "Testing with $$threads threads..."; \
+		sbatch --cpus-per-task=$$threads submit_orfeo.sh; \
+	done
+
+.PHONY: all clean run openmp_scaling
