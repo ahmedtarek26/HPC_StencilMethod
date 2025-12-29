@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -J stencil_openmp
-#SBATCH -A uTS25_Tornator_0
+#SBATCH --account=uTS25_Tornator_0
 #SBATCH --partition=EPYC
 #SBATCH -N 1
 #SBATCH --ntasks=1
