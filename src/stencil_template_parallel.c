@@ -239,15 +239,15 @@ int memory_release (plane_t *planes, buffers_t *buffers) {
     if (planes[NEW].data) free(planes[NEW].data);
   }
   if (buffers) {
-    if ((*buffers)[SEND][EAST]) free((*buffers)[SEND][EAST]);
-    if ((*buffers)[RECV][EAST]) free((*buffers)[RECV][EAST]);
-    if ((*buffers)[SEND][WEST]) free((*buffers)[SEND][WEST]);
-    if ((*buffers)[RECV][WEST]) free((*buffers)[RECV][WEST]);
+    if (buffers[0][SEND][EAST]) free(buffers[0][SEND][EAST]);
+    if (buffers[0][RECV][EAST]) free(buffers[0][RECV][EAST]);
+    if (buffers[0][SEND][WEST]) free(buffers[0][SEND][WEST]);
+    if (buffers[0][RECV][WEST]) free(buffers[0][RECV][WEST]);
   }
   return 0;
 }
 
-int memory_allocate (const uint neighbours[4],
+int memory_allocate (const int neighbours[4],
                      const vec2_t N,
                      buffers_t *buffers_ptr,
                      plane_t *planes_ptr) {
@@ -264,10 +264,10 @@ int memory_allocate (const uint neighbours[4],
   memset(planes_ptr[NEW].data, 0, frame_size);
 
   uint sizey = planes_ptr[OLD].size[_y_];
-  (*buffers_ptr)[SEND][EAST] = malloc(sizey * sizeof(double));
-  (*buffers_ptr)[RECV][EAST] = malloc(sizey * sizeof(double));
-  (*buffers_ptr)[SEND][WEST] = malloc(sizey * sizeof(double));
-  (*buffers_ptr)[RECV][WEST] = malloc(sizey * sizeof(double));
+  buffers_ptr[0][SEND][EAST] = (double*)malloc(sizey * sizeof(double));
+  buffers_ptr[0][RECV][EAST] = (double*)malloc(sizey * sizeof(double));
+  buffers_ptr[0][SEND][WEST] = (double*)malloc(sizey * sizeof(double));
+  buffers_ptr[0][RECV][WEST] = (double*)malloc(sizey * sizeof(double));
 
   return 0;
 }
@@ -294,7 +294,7 @@ int initialize ( MPI_Comm *Comm,
                  vec2_t   *N,                 
                  int      *periodic,
                  int      *output_energy_stat_perstep,
-                 uint     *neighbours,
+                 int      *neighbours,
                  int      *Niterations,
                  int      *Nsources,
                  int      *Nsources_local,
