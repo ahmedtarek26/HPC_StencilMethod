@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -J mpi_weak_scaling
-#SBATCH -A uTS25_Tornator_0
-#SBATCH --partition=dcgp_usr_prod
+#SBATCH -A dssc
+#SBATCH --partition=EPYC
 #SBATCH -N 4
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=112
