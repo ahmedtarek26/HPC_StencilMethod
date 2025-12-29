@@ -167,9 +167,7 @@ int main(int argc, char **argv)
         MPI_Irecv(buffers[RECV][EAST], sizey, MPI_DOUBLE, neighbours[EAST], 2, myCOMM_WORLD, &reqs[req_idx++]);
       }
 
-      // To overlap: Update inner grid while comms happen (if possible, but for small grids may not help)
-      // For now, wait immediately; optimize later by splitting update into border/inner.
-
+      // Wait for comms
       MPI_Waitall(req_idx, reqs, MPI_STATUSES_IGNORE);
 
       total_comm_time += MPI_Wtime() - section_start_time;
@@ -230,89 +228,67 @@ int main(int argc, char **argv)
   // Output final energy
   output_energy_stat ( -1, &planes[current], Niterations * Nsources * energy_per_source, Rank, &myCOMM_WORLD );
 
-  memory_release(planes, &buffers[0], Sources_local);
+  memory_release(planes, &buffers[0]);
+  if (Sources_local) free(Sources_local);
   free(g_per_thread_comp_time);
   MPI_Finalize();
   return 0;
 }
 
-// Complete memory_release (3 args to match your call)
-int memory_release ( plane_t   *planes,
-                     buffers_t *buffers,
-                     vec2_t    *sources_local
-		     )
-{
+int memory_release ( plane_t *planes, buffers_t *buffers ) {
 
-  if ( planes != NULL )
-    {
-      if ( planes[OLD].data != NULL )
-	free (planes[OLD].data);
-      
-      if ( planes[NEW].data != NULL )
-	free (planes[NEW].data);
-    }
+  if ( planes != NULL ) {
+    if ( planes[OLD].data != NULL ) free (planes[OLD].data);
+    if ( planes[NEW].data != NULL ) free (planes[NEW].data);
+  }
 
   // Free buffers (E/W allocated)
-  if ((*buffers)[SEND][EAST] != NULL) free((*buffers)[SEND][EAST]);
-  if ((*buffers)[RECV][EAST] != NULL) free((*buffers)[RECV][EAST]);
-  if ((*buffers)[SEND][WEST] != NULL) free((*buffers)[SEND][WEST]);
-  if ((*buffers)[RECV][WEST] != NULL) free((*buffers)[RECV][WEST]);
-  // North/South are pointers, no free
+  if ((*buffers)[SEND][EAST]) free((*buffers)[SEND][EAST]);
+  if ((*buffers)[RECV][EAST]) free((*buffers)[RECV][EAST]);
+  if ((*buffers)[SEND][WEST]) free((*buffers)[SEND][WEST]);
+  if ((*buffers)[RECV][WEST]) free((*buffers)[RECV][WEST]);
+  // N/S are pointers, no free
 
-  if (sources_local != NULL) free(sources_local);
-      
   return 0;
 }
 
-// Complete memory_allocate
-int memory_allocate ( const uint    neighbours[4],
-		      const vec2_t  N,
-		      buffers_t    *buffers_ptr,
-		      plane_t      *planes_ptr )
-{
+int memory_allocate ( const uint neighbours[4],
+		      const vec2_t N,
+		      buffers_t *buffers_ptr,
+		      plane_t *planes_ptr ) {
 
-  if (planes_ptr == NULL ) {
-    fprintf(stderr, "Error: Invalid planes_ptr.\n");
+  if (planes_ptr == NULL || buffers_ptr == NULL) {
+    fprintf(stderr, "Error: Invalid pointer.\n");
     return 1;
   }
 
-  if (buffers_ptr == NULL ) {
-    fprintf(stderr, "Error: Invalid buffers_ptr.\n");
-    return 1;
-  }
-    
-
-  // Allocate planes with halo frame
-  unsigned int frame_size = (planes_ptr[OLD].size[_x_]+2) * (planes_ptr[OLD].size[_y_]+2) * sizeof(double);
+  unsigned int frame_size = (planes_ptr[OLD].size[_x_] + 2) * (planes_ptr[OLD].size[_y_] + 2) * sizeof(double);
 
   planes_ptr[OLD].data = (double*)malloc( frame_size );
   if ( planes_ptr[OLD].data == NULL ) {
-    perror("malloc failed for OLD plane");
+    perror("malloc failed");
     return 1;
   }
   memset ( planes_ptr[OLD].data, 0, frame_size );
 
   planes_ptr[NEW].data = (double*)malloc( frame_size );
   if ( planes_ptr[NEW].data == NULL ) {
-    perror("malloc failed for NEW plane");
+    perror("malloc failed");
     return 1;
   }
   memset ( planes_ptr[NEW].data, 0, frame_size );
 
-  // Allocate E/W buffers (sizey doubles)
+  // Allocate E/W buffers
   uint sizey = planes_ptr[OLD].size[_y_];
   (*buffers_ptr)[SEND][EAST] = (double*)malloc(sizey * sizeof(double));
   (*buffers_ptr)[RECV][EAST] = (double*)malloc(sizey * sizeof(double));
   (*buffers_ptr)[SEND][WEST] = (double*)malloc(sizey * sizeof(double));
   (*buffers_ptr)[RECV][WEST] = (double*)malloc(sizey * sizeof(double));
 
-  // N/S point to plane data (set in loop)
-
   return 0;
 }
 
-int output_energy_stat ( int step, plane_t *plane, double budget, int Me, MPI_Comm *Comm )
-{
+int output_energy_stat ( int step, plane_t *plane, double budget, int Me, MPI_Comm *Comm ) {
 
   double system_energy = 0;
   double tot_system_energy = 0;
@@ -320,19 +296,16 @@ int output_energy_stat ( int step, plane_t *plane, double budget, int Me, MPI_Co
   
   MPI_Reduce ( &system_energy, &tot_system_energy, 1, MPI_DOUBLE, MPI_SUM, 0, *Comm );
   
-  if ( Me == 0 )
-    {
-      if ( step >= 0 )
-	printf(" [ step %4d ] ", step ); fflush(stdout);
-
-      
-      printf( "total injected energy is %g, "
-	      "system energy is %g "
-	      "( in avg %g per grid point)\n",
-	      budget,
-	      tot_system_energy,
-	      tot_system_energy / (plane->size[_x_]*plane->size[_y_]) );
-    }
+  if ( Me == 0 ) {
+    if ( step >= 0 ) printf(" [ step %4d ] ", step ); fflush(stdout);
+    
+    printf( "total injected energy is %g, "
+	    "system energy is %g "
+	    "( in avg %g per grid point)\n",
+	    budget,
+	    tot_system_energy,
+	    tot_system_energy / (plane->size[_x_]*plane->size[_y_]) );
+  }
   
   return 0;
 }
