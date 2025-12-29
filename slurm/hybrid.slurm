@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -J stencil_hybrid
-#SBATCH -A uTS25_Tornator_0
+#SBATCH --account=uTS25_Tornator_0
 #SBATCH --partition=EPYC
 #SBATCH -N 8
 #SBATCH --ntasks-per-node=8
