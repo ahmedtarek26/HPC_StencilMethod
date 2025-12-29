@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH -J stencil_serial
 #SBATCH -A uTS25_Tornator_0
-#SBATCH --partition=epyc
+#SBATCH --partition=EPYC
 #SBATCH -N 1
 #SBATCH --ntasks=1
 #SBATCH --time=00:10:00
