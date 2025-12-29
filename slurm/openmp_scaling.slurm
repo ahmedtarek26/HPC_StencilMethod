@@ -1,19 +1,15 @@
 #!/bin/bash
-#!/bin/bash
-#SBATCH -J stencil_scaling
-#SBATCH -A a.elsayed
-#SBATCH --partition=EPYC
-#SBATCH -N 1
-#SBATCH --ntasks-per-node=1
-#SBATCH --cpus-per-task=128
-#SBATCH --time=01:00:00
-
-module load openMPI/5.0.5   
-
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=7
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=0
+#SBATCH --partition=dcgp_usr_prod
+#SBATCH --account=uTS25_Tornator_0
+#SBATCH --time=00:10:00
 #SBATCH --output=omp_scaling_%j.out
 
 module load gcc/12.2.0
-module load openMPI/5.0.5
+module load openmpi/4.1.6--gcc--12.2.0
 
 
 EXEC="./stencil_parallel"
