@@ -1,7 +1,7 @@
 #!/bin/bash
 #!/bin/bash
 #SBATCH -J stencil_scaling
-#SBATCH -A dssc                
+#SBATCH -A a.elsayed
 #SBATCH --partition=EPYC
 #SBATCH -N 1
 #SBATCH --ntasks-per-node=1
